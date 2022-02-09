@@ -7,7 +7,7 @@
 
 -module(lux_suite).
 
--export([run/4, args_to_opts/3, annotate_log/3]).
+-export([run/4, args_to_opts/3, annotate_log/3, merge_logs/2]).
 
 -include("lux.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -24,7 +24,7 @@ adjust_files(R) ->
 %% Run a test suite
 
 -spec run(filename(), opts(), string(), [string()]) ->
-             {ok, summary(), filename(), [result()]} | error() | no_input().
+          {ok, summary(), filename(), [result()]} | error() | no_input().
 
 run(Files, Opts, PrevLogDir, OrigArgs) when is_list(Files) ->
     R0 = #rstate{files = Files,
@@ -156,7 +156,8 @@ list_files(R, File) ->
         {ok, #file_info{type = directory}} ->
             Fun = fun(F, Acc) -> [F | Acc] end,
             RegExp = R#rstate.file_pattern,
-            Files = lux_utils:fold_files(File, RegExp, true, Fun, []),
+            Recursive = true,
+            Files = lux_utils:fold_files(File, RegExp, Recursive, Fun, []),
             {ok, lists:sort(Files)};
         {ok, _} ->
             {ok, [File]};
@@ -168,9 +169,9 @@ full_run(#rstate{mode = Mode} = R, _ConfigData, SummaryLog)
   when Mode =:= dump   orelse
        Mode =:= expand ->
     InitialSummary = success,
-    InitialRes = [],
+    InitialSuiteRes = [],
     {_R2, Summary, Results} =
-        run_suite(R, R#rstate.files, InitialSummary, InitialRes),
+        run_suite(R, R#rstate.files, InitialSummary, InitialSuiteRes),
     {run_ok, Summary, SummaryLog, Results};
 full_run(#rstate{progress = Progress} = R, ConfigData, SummaryLog) ->
     ExtendRun = R#rstate.extend_run,
@@ -212,8 +213,8 @@ maybe_write_junit_report(#rstate{junit = true}, SummaryLog, ConfigData) ->
 initial_res(_R, Exists, _ConfigData, SummaryLog, _Summary)
   when Exists =:= true ->
     TmpLog = SummaryLog ++ ".tmp",
-    WWW = undefined,
-    {ParseRes, NewWWW} = lux_log:parse_summary_log(TmpLog, WWW),
+    OldWWW = undefined,
+    {ParseRes, NewWWW} = lux_log:parse_summary_log(TmpLog, OldWWW),
     lux_utils:stop_app(NewWWW),
     NewRes =
         case ParseRes of
@@ -235,8 +236,77 @@ write_config_log(SummaryLog, ConfigData) ->
     ConfigLog = filename:join([LogDir, ?SUITE_CONFIG_LOG]),
     ok = lux_log:write_config_log(ConfigLog, ConfigData).
 
+-spec merge_logs([filename()], filename()) ->
+          ok | error().
+
+merge_logs(Sources, RelLogDir) ->
+    io:format("Invoke: ~s\n",
+              [string:join(init:get_plain_arguments(), " ")]),
+    RelDir = "",
+    Cands = lux_utils:summary_log_candidates(),
+    WWW = undefined,
+    Acc = [],
+    {NewWWW, NewAcc} =
+        collect_logs(Sources, RelLogDir, RelDir, Cands, WWW, Acc),
+    lux_utils:stop_app(NewWWW),
+io:format("\nRES ~p\n", [NewAcc]),
+    ok.
+
+collect_logs([Source | Sources], RelLogDir, RelDir, Cands, WWW, Acc) ->
+    io:format("\n\t~s", [Source]),
+    {NewWWW, NewAcc} =
+        search_summary_dirs(Source, RelLogDir, RelDir, Cands, WWW, Acc),
+    collect_logs(Sources, RelLogDir, RelDir, Cands, NewWWW, NewAcc);
+collect_logs([], _RelLogDir, _RelDir, _Cands, WWW, Acc) ->
+    {WWW, Acc}.
+
+search_summary_dirs(RelSource, RelLogDir, RelDir, Cands, WWW, Acc)
+  when is_list(RelDir) ->
+    Dir0 = lux_utils:join(RelSource, RelDir),
+    Dir = lux_utils:normalize_filename(Dir0),
+    case file:list_dir(Dir) of
+        {ok, Files} ->
+            case lux_utils:multi_member(Cands, Files) of
+                {true, Base} ->
+                    case lists:suffix(".log", Base) of
+                        true ->
+                            %% A summary log
+                            LogFile = filename:join([Dir, Base]),
+                            {ParseRes, NewWWW} =
+                                lux_log:parse_summary_log(LogFile, WWW),
+                            {NewWWW, [{LogFile, ParseRes} | Acc]};
+                        false ->
+                            %% Skip
+                            io:format("s", []),
+                            {WWW, Acc}
+                    end;
+                false ->
+                    %% No interesting file found. Search subdirs
+                    Fun =
+                        fun("latest_run", {W, A}) ->
+                                %% Symlink
+                                {W, A};
+                           (Base, {W, A}) ->
+                                RelDir2 =
+                                    case RelDir of
+                                        "" ->
+                                            Base;
+                                        _  ->
+                                            lux_utils:join(RelDir, Base)
+                                    end,
+                                search_summary_dirs(RelSource, RelLogDir,
+                                                    RelDir2, Cands, W, A)
+                        end,
+                    lists:foldl(Fun, {WWW, Acc}, Files)
+            end;
+        {error, _Reason} ->
+            %% Not a dir or problem to read dir
+            io:format("e", []),
+            {WWW, Acc}
+    end.
+
 -spec annotate_log(boolean(), filename(), opts()) ->
-             ok | error().
+          ok | error().
 
 annotate_log(IsRecursive, LogFile, Opts) ->
     DefaultDir = filename:dirname(LogFile),

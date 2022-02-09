@@ -91,10 +91,10 @@ close_summary_tmp_log(SummaryFd) ->
     file:close(SummaryFd).
 
 parse_summary_log(SummaryLog, WWW) when is_list(SummaryLog) ->
-    Source = #source{branch=undefined,
-                     suite_prefix=undefined,
-                     file=?l2b(SummaryLog),
-                     orig=?l2b(SummaryLog)},
+    Source = #source{branch = undefined,
+                     suite_prefix = undefined,
+                     file = ?l2b(SummaryLog),
+                     orig = ?l2b(SummaryLog)},
     parse_summary_log(Source, WWW);
 parse_summary_log(#source{file=SummaryLog} = Source, WWW)
   when is_binary(SummaryLog)->
@@ -110,7 +110,7 @@ parse_summary_log(#source{file=SummaryLog} = Source, WWW)
             {{error, SummaryLog, ReasonStr}, WWW}
     end.
 
-try_parse_summary_log(#source{file=SummaryLogBin}, WWW) ->
+try_parse_summary_log(#source{file = SummaryLogBin}, WWW) ->
     SummaryLog = ?b2l(SummaryLogBin),
     {ReadRes, NewWWW} = read_log(SummaryLog, ?SUMMARY_TAG, WWW),
     Res =
