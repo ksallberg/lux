@@ -889,6 +889,7 @@ normalize_diff_regexp(RegExp) when is_list(RegExp) ->
 diff_iter(ExpectedTag, Old, New, Mode, Fun)
   when Mode =:= flat; Mode =:= deep ->
     Diff = diff(ExpectedTag, Old, New),
+    io:format("diff: ~p~n", [Diff]),
     diff_iter(ExpectedTag, Diff, Mode, Fun).
 
 -spec diff_iter(expected_tag(), diff(), mode(), callback()) -> acc().

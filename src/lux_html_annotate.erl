@@ -853,19 +853,30 @@ html_result2(Tag, Result, HtmlLog) ->
 html_diff(ExpectedTag, Expected, Details) ->
 %%  Mode = flat, % 'deep' gives insanely bad performance for big diffs
     Mode = deep,
-    lux_utils:diff_iter(ExpectedTag, Expected, Details, Mode, fun emit/4).
+    io:format("ExpectedTag: ~p~n", [ExpectedTag]),
+    io:format("Expected: ~p~n", [Expected]),
+    io:format("Details: ~p~n", [Details]),
+    X = lux_utils:diff_iter(ExpectedTag, Expected, Details, Mode, fun emit/4),
+    io:format("html_diff: ~p~n", [X]),
+    [<<"<table><tr><th style=\"background-color:#90EE90;\">Expected</th>">>,
+     <<"<th style=\"background-color:#ff6766;\">Diff</th></tr>">>] ++
+        X ++ [<<"</table>">>].
 
 emit(Op, Mode, Context, Acc) when Mode =:= flat;
                                   Mode =:= deep ->
     case Op of
         {common, Common} ->
+            io:format("hittar common! ~p~n", [Common]),
+            Text = html_color(common, Mode, <<"  ">>,
+                              lux_utils:shrink_lines(Common)),
             [Acc,
-             "\n", html_color(common, Mode, <<"  ">>,
-                              lux_utils:shrink_lines(Common))];
+             "<tr><td>", Text, "</td><td>", Text, "</tr>"];
         {del, Del} ->
+            io:format("hittar del! ~p~n", [Del]),
             [Acc,
              "\n", html_color(del, Mode, <<"- ">>, Del)];
         {add, Add} ->
+            io:format("hittar add! ~p~n", [Add]),
             Prefix =
                 case Context of
                     first  -> <<"  ">>;
@@ -873,34 +884,44 @@ emit(Op, Mode, Context, Acc) when Mode =:= flat;
                     last   -> <<"  ">>
                 end,
             [Acc,
-             "\n", html_color(add, Mode, Prefix, Add)];
+             "<tr><td></td><td>", html_color(add, Mode, Prefix, Add), "</td></tr>"];
         {replace, Del, Add} when Mode =:= flat ->
+            io:format("hittar replace! ~p ~p ~n", [Del, Add]),
             [
              Acc,
              "\n", html_color(del, Mode, <<"- ">>, Del),
              "\n", html_color(add, Mode, <<"+ ">>, Add)
             ];
         {nested, Del, Add, [_SingleNestedOp]} when Mode =:= deep ->
+            io:format("hittar nested! ~p ~p ~n", [Del, Add]),
             %% Skip underline
             [
              Acc,
-             "\n", html_color(del, Mode, <<"- ">>, Del),
-             "\n", html_color(add, Mode, <<"+ ">>, Add)
+             "<tr><td>", Del, "</td>",
+             "<td>", Add, "</td></tr>"
             ];
         {nested, _OrigDel, _OrigAdd, RevNestedAcc} when Mode =:= deep ->
+
             NestedAcc = lists:reverse(RevNestedAcc),
             Del = ?l2b(nested_emit(del, NestedAcc, [])),
             Add = ?l2b(nested_emit(add, NestedAcc, [])),
+            io:format("hittar nested2! ~p ~p ~n", [Del, Add]),
             Del2 = binary:split(Del, <<"\n">>, [global]),
             Add2 = binary:split(Add, <<"\n">>, [global]),
             [
              Acc,
-             "\n", html_color(del, nested, <<"- ">>, Del2),
-             "\n", html_color(add, nested, <<"+ ">>, Add2)
+             "<tr>",green_td(), Del2, "</td>",
+             red_td(), Add2, "</td></tr>"
             ]
     end;
 emit(Op, Mode, _Context, Acc) when Mode =:= nested ->
     [Op | Acc].
+
+green_td() ->
+    "<td style=\"background-color:#90EE90;\">".
+
+red_td() ->
+    "<td style=\"background-color:#ff6766;\">".
 
 nested_emit(Op, [NestedOp | Rest], Acc) ->
     case NestedOp of
